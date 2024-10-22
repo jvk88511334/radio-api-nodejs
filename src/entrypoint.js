@@ -2,20 +2,23 @@
 const express = require('express');
 const app = express();
 // routes files
-const radioPlaylist = require('./routes/onlineradiobox-playlist-scraper')
+const radioPlaylist = require('./routes/onlineradiobox-playlist-scraper');
+const radioLastSongPlayed = require('./routes/onlineradiobox-lasttitle-played');
 
 // Middleware pour parser le JSON
 app.use(express.json());
 
 // Routes
 app.use('/playlist', radioPlaylist);
+app.use('/lastsong', radioLastSongPlayed);
 
 // Route de base
 app.get('/', (req, res) => {
   res.json({
     message: 'API Radio fonctionnelle',
     endpoints: {
-      playlist: '/playlist/country/:countryCode/radioname/:radioFullName'
+      playlist: '/playlist/country/:countryCode/radioname/:radioFullName',
+      lastsong: 'lastsong/country/:countryCode/radioname/:radioFullName'
     }
   });
 });
