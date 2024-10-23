@@ -2,8 +2,8 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const cheerio = require('cheerio');
+const {normalizeToAscii} = require("../utils/normalize-to-ascii");
 
-//To know radioname go to onlineradiobox and check url when you go to playlist
 router.get('/country/:countryCode/radioname/:radioFullName', async (req, res) => {
   const radioName = req.params.radioFullName.toLowerCase();
   const countryCode = req.params.countryCode.toLowerCase();
@@ -14,60 +14,77 @@ router.get('/country/:countryCode/radioname/:radioFullName', async (req, res) =>
     const response = await axios.get(url);
     const $ = cheerio.load(response.data);
 
-    // Récupérer les 10 premiers titres pour analyse
+    // Récupérer les titres pour analyse
     const recentTracks = [];
     const trackOccurrences = {};
+    let totalAnalyzedTracks = 0;
 
-    // Collecter les titres récents et compter leurs occurrences
+    // Première passe : collecter les occurrences pour identifier les slogans
     $('table.tablelist-schedule tbody tr').each((index, element) => {
-      if (index >= 10) return false; // Limiter à 10 entrées pour l'analyse
+      if (index >= 20) return false; // Augmenté à 20 pour avoir plus de contexte
+
+      const trackInfo = normalizeToAscii($(element).find('.track_history_item').text().trim());
+      if (trackInfo) {
+        trackOccurrences[trackInfo] = (trackOccurrences[trackInfo] || 0) + 1;
+        totalAnalyzedTracks++;
+      }
+    });
+
+    // Identifier les slogans basés sur la fréquence
+    const FREQUENCY_THRESHOLD = 0.2;
+    const slogans = new Set();
+
+    for (const [track, count] of Object.entries(trackOccurrences)) {
+      if (count / totalAnalyzedTracks > FREQUENCY_THRESHOLD) {
+        slogans.add(track);
+      }
+    }
+
+    // Deuxième passe : collecter les titres avec leur timing
+    $('table.tablelist-schedule tbody tr').each((index, element) => {
+      if (index >= 20) return false;
 
       const time = $(element).find('.tablelist-schedule__time .time--schedule').text().trim();
-      const trackInfo = $(element).find('.track_history_item').text().trim();
+      const trackInfo = normalizeToAscii($(element).find('.track_history_item').text().trim());
 
       if (trackInfo) {
         recentTracks.push({
           time: time,
-          track: trackInfo
+          track: trackInfo,
+          isSlogan: slogans.has(trackInfo)
         });
-        trackOccurrences[trackInfo] = (trackOccurrences[trackInfo] || 0) + 1;
       }
     });
 
-    // Identifier les titres répétitifs (slogans)
-    const FREQUENCY_THRESHOLD = 0.2; // 20% pour une fenêtre plus petite
-    const frequentTracks = new Set();
-    const totalTracks = recentTracks.length;
+    // Trouver le dernier titre non-slogan
+    let validTrack = null;
+    let foundValidTrack = false;
 
-    for (const [track, count] of Object.entries(trackOccurrences)) {
-      if (count / totalTracks > FREQUENCY_THRESHOLD) {
-        frequentTracks.add(track);
+    for (let i = 0; i < recentTracks.length && !foundValidTrack; i++) {
+      const currentTrack = recentTracks[i];
+
+      if (!currentTrack.isSlogan) {
+        validTrack = {
+          time: currentTrack.time,
+          title: currentTrack.track
+        };
+        foundValidTrack = true;
       }
     }
 
-    // Trouver le dernier titre non répétitif
-    let lastValidTrack = null;
-    for (const track of recentTracks) {
-      if (!frequentTracks.has(track.track)) {
-        lastValidTrack = track;
-        break;
-      }
-    }
-
-    if (!lastValidTrack) {
+    if (!validTrack) {
       res.status(404).json({
         error: 'Aucun titre valide trouvé',
         radioName: radioName,
-        removedTracks: Array.from(frequentTracks)
+        country: countryCode,
+        slogans: Array.from(slogans)
       });
     } else {
       res.json({
         radioName: radioName,
-        lastTrack: {
-          time: lastValidTrack.time,
-          title: lastValidTrack.track
-        },
-        removedTracks: Array.from(frequentTracks)
+        country: countryCode,
+        lastTrack: validTrack,
+        slogans: Array.from(slogans)
       });
     }
 
@@ -75,7 +92,9 @@ router.get('/country/:countryCode/radioname/:radioFullName', async (req, res) =>
     console.error('Erreur lors de la récupération du dernier titre:', error);
     res.status(500).json({
       error: 'Erreur lors de la récupération du dernier titre',
-      details: error.message
+      details: error.message,
+      radioName: radioName,
+      country: countryCode
     });
   }
 });

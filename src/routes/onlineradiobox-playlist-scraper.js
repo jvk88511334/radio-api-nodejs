@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const cheerio = require('cheerio');
+const { normalizeToAscii } = require('../utils/normalize-to-ascii');
 
 router.get('/country/:countryCode/radioname/:radioFullName', async (req, res) => {
   const radioName = req.params.radioFullName.toLowerCase();
@@ -23,7 +24,7 @@ router.get('/country/:countryCode/radioname/:radioFullName', async (req, res) =>
     // Collecte initiale des données
     $('table.tablelist-schedule tbody tr').each((index, element) => {
       const time = $(element).find('.tablelist-schedule__time .time--schedule').text().trim();
-      const trackInfo = $(element).find('.track_history_item').text().trim();
+      const trackInfo = normalizeToAscii($(element).find('.track_history_item').text().trim());
 
       if (trackInfo) {
         tempPlaylist.push({
